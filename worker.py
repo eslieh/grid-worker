@@ -1,0 +1,9 @@
+from tasks import celery_app
+
+if __name__ == "__main__":
+    # Start the Celery worker to listen to Redis
+    celery_app.worker_main([
+        "worker",
+        "--loglevel=info",
+        "--queues=default"  # default queue
+    ])
