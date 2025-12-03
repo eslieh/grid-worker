@@ -1,0 +1,132 @@
+
+1️⃣ Base Schema
+Request JSON (worker input)
+json
+Copy code
+{
+  "data": {
+    "task_type": "image.remove_bg", 
+    "task_id": "uuid-1234",
+    "payload": {
+      "original_url": "https://yourserver.com/uploads/original/abc123.png",
+      "parameters": {} 
+    }
+  }
+}
+task_type → string enum (image.remove_bg, image.resize, image.to_pdf, text.summarize, etc.)
+
+task_id → unique ID for the task
+
+original_url → URL of the uploaded file (image/audio/pdf/text file)
+
+parameters → dictionary with job-specific options
+
+2️⃣ Image Workers JSON Examples
+a) image.remove_bg
+json
+Copy code
+{
+  "data": {
+    "task_type": "image.remove_bg",
+    "task_id": "uuid-001",
+    "payload": {
+      "original_url": "https://yourserver.com/uploads/original/photo.png",
+      "parameters": {
+        "output_format": "png" 
+      }
+    }
+  }
+}
+b) image.resize
+json
+Copy code
+{
+  "data": {
+    "task_type": "image.resize",
+    "task_id": "uuid-002",
+    "payload": {
+      "original_url": "https://yourserver.com/uploads/original/photo.png",
+      "parameters": {
+        "width": 800,
+        "height": 600,
+        "keep_aspect_ratio": true,
+        "output_format": "jpg"
+      }
+    }
+  }
+}
+c) image.to_pdf
+json
+Copy code
+{
+  "data": {
+    "task_type": "image.to_pdf",
+    "task_id": "uuid-003",
+    "payload": {
+      "original_url": [
+        "https://yourserver.com/uploads/original/photo1.png",
+        "https://yourserver.com/uploads/original/photo2.jpg"
+      ],
+      "parameters": {
+        "output_file_name": "my_photos.pdf"
+      }
+    }
+  }
+}
+3️⃣ Text Workers JSON Examples
+a) text.summarize
+json
+Copy code
+{
+  "data": {
+    "task_type": "text.summarize",
+    "task_id": "uuid-101",
+    "payload": {
+      "original_url": "https://yourserver.com/uploads/original/article.txt",
+      "parameters": {
+        "summary_length": "short"
+      }
+    }
+  }
+}
+b) text.keywords
+json
+Copy code
+{
+  "data": {
+    "task_type": "text.keywords",
+    "task_id": "uuid-102",
+    "payload": {
+      "original_url": "https://yourserver.com/uploads/original/article.txt",
+      "parameters": {
+        "max_keywords": 10
+      }
+    }
+  }
+}
+4️⃣ Worker Output JSON (for all job types)
+json
+Copy code
+{
+  "data": {
+    "task_id": "uuid-001",
+    "status": "done",  // "done", "failed", "processing"
+    "result": {
+      "output_url": "https://yourserver.com/uploads/processed/photo_removed.png",
+      "metadata": {
+        "original_file_name": "photo.png",
+        "output_file_name": "photo_removed.png",
+        "output_format": "png",
+        "processing_time": 1.24  // seconds
+      }
+    },
+    "error": null
+  }
+}
+status → "done" / "failed" / "processing"
+
+output_url → location of processed file
+
+metadata → optional info: format, dimensions, processing time, etc.
+
+error → string with error message if failed
