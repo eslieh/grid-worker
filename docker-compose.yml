@@ -4,8 +4,8 @@ services:
 
   celery_worker:
     build: .
-    container_name: celery_worker
-    command: celery -A app.celery worker --loglevel=info
+    container_name: grid_celery_worker
+    command: celery -A worker.celery_app worker --loglevel=info -P solo
     env_file:
       - .env
 
