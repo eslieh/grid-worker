@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+
+  celery_worker:
+    build: .
+    container_name: celery_worker
+    command: celery -A app.celery worker --loglevel=info
+    env_file:
+      - .env
+
