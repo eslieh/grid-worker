@@ -245,6 +245,8 @@ def resize_image(self, task_id, payload):
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=3, name="images.to_pdf")
 def to_pdf(self, task_id, payload):
+    temp_files = []
+    
     try:
         print("Creating PDF for:", payload)
 
@@ -257,35 +259,102 @@ def to_pdf(self, task_id, payload):
 
         output_file_name = params.get("output_file_name") or f"merged_{uuid.uuid4()}.pdf"
         temp_pdf_path = f"/tmp/{output_file_name}"
+        temp_files.append(temp_pdf_path)
 
-        pdf = FPDF()
+        # Create PDF with reportlab
+        c = canvas.Canvas(temp_pdf_path, pagesize=A4)
+        page_width, page_height = A4  # 595.27 x 841.89 points
 
-        for url in original_urls:
-            response = requests.get(url)
+        for idx, url in enumerate(original_urls):
+            print(f"Processing image {idx + 1}/{len(original_urls)}: {url}")
+            
+            # Download image
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            # Open image
             img = Image.open(BytesIO(response.content))
             
-            # Save temp image
-            temp_img = f"/tmp/temp_{uuid.uuid4()}.jpg"
-            if img.mode in ("RGBA", "P"):
+            # Convert to RGB
+            if img.mode in ("RGBA", "P", "LA", "L"):
                 img = img.convert("RGB")
-            img.save(temp_img)
             
-            pdf.add_page()
-            pdf.image(temp_img, x=0, y=0, w=210, h=297)  # A4 dimensions in mm
+            # Get dimensions
+            img_width, img_height = img.size
+            aspect_ratio = img_width / img_height
             
+            # Calculate scaling
+            if aspect_ratio > (page_width / page_height):
+                w = page_width
+                h = page_width / aspect_ratio
+            else:
+                h = page_height
+                w = page_height * aspect_ratio
+            
+            # Center on page
+            x = (page_width - w) / 2
+            y = (page_height - h) / 2
+            
+            # Save to temp file for reportlab
+            temp_img = f"/tmp/temp_{uuid.uuid4()}.jpg"
+            temp_files.append(temp_img)
+            img.save(temp_img, "JPEG", quality=95)
+            
+            # Draw image
+            c.drawImage(temp_img, x, y, width=w, height=h)
+            c.showPage()
+            
+            # Cleanup
             os.remove(temp_img)
+            temp_files.remove(temp_img)
 
-        pdf.output(temp_pdf_path)
-        print("PDF saved to:", temp_pdf_path)
+        c.save()
+        print(f"PDF created: {temp_pdf_path} ({os.path.getsize(temp_pdf_path)} bytes)")
 
-        # Upload to Cloudinary
-        upload_result = cloudinary.uploader.upload(
-            temp_pdf_path,
-            resource_type="raw",
-            public_id=output_file_name.replace(".pdf", "")
-        )
-        cloud_url = upload_result.get("secure_url")
-        print("Uploaded to Cloudinary:", cloud_url)
+        # Try uploading to Cloudinary with different settings
+        try:
+            upload_result = cloudinary.uploader.upload(
+                temp_pdf_path,
+                resource_type="auto",  # Changed from "raw"
+                public_id=output_file_name.replace(".pdf", ""),
+                format="pdf",
+                access_mode="public",
+                invalidate=True,  # Clear CDN cache
+                overwrite=True
+            )
+            
+            cloud_url = upload_result.get("secure_url")
+            print("Cloudinary upload result:", upload_result)
+            
+        except Exception as cloudinary_error:
+            print(f"Cloudinary upload error: {cloudinary_error}")
+            
+            # Fallback: Try uploading as image type
+            upload_result = cloudinary.uploader.upload(
+                temp_pdf_path,
+                resource_type="image",
+                public_id=output_file_name.replace(".pdf", ""),
+                format="pdf"
+            )
+            cloud_url = upload_result.get("secure_url")
+            print("Cloudinary upload (image type) result:", upload_result)
+
+        # Verify the URL is accessible
+        verify_response = requests.head(cloud_url, timeout=10)
+        print(f"URL verification status: {verify_response.status_code}")
+        
+        if verify_response.status_code == 401:
+            print("WARNING: Uploaded file returns 401. Cloudinary settings may need adjustment.")
+            # Check if there's an unsigned URL available
+            if "secure_url" in upload_result:
+                # Try the non-secure URL
+                insecure_url = upload_result.get("url")
+                print(f"Trying insecure URL: {insecure_url}")
+                cloud_url = insecure_url
+
+        # Clean up temp PDF
+        if os.path.exists(temp_pdf_path):
+            os.remove(temp_pdf_path)
 
         result_json = {
             "task_id": task_id,
@@ -296,16 +365,28 @@ def to_pdf(self, task_id, payload):
                     "file_name": output_file_name,
                     "pages": len(original_urls),
                     "processing_time": upload_result.get("created_at"),
+                    "file_size": upload_result.get("bytes"),
+                    "cloudinary_public_id": upload_result.get("public_id"),
                 }
             },
             "error": None
         }
 
         # Send result to backend API
-        requests.post(WEB_API_URL, json=result_json)
+        api_response = requests.post(WEB_API_URL, json=result_json, timeout=10)
+        api_response.raise_for_status()
 
         return result_json
 
     except Exception as exc:
-        print("Error in PDF task:", exc)
+        print(f"Error in PDF task: {type(exc).__name__}: {exc}")
+        
+        # Clean up temp files
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as cleanup_error:
+                print(f"Failed to clean up {temp_file}: {cleanup_error}")
+        
         raise self.retry(exc=exc)

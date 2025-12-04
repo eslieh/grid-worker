@@ -7,3 +7,4 @@ if __name__ == "__main__":
         "--loglevel=info",
         "--queues=default"  # default queue
     ])
+    # celery -A worker.celery_app worker --loglevel=info -P solo # for single-threaded execution
