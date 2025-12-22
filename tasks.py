@@ -14,8 +14,8 @@ import cloudinary
 import cloudinary.uploader
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+from logger import logger
 from reportlab.lib.utils import ImageReader
-
 import hashlib
 import sys
 
@@ -31,6 +31,7 @@ if sys.version_info < (3, 9):
 
 load_dotenv()
 REDIS_URL = os.getenv("REDIS_CONNECTION_STRING", "redis://localhost:6379/0")
+
 
 celery_app = Celery('worker', broker=f"{REDIS_URL}/0", backend=f"{REDIS_URL}/0")
 
@@ -143,13 +144,10 @@ def remove_bg(self, task_id, payload):
             },
             "error": None
         }
-
-        result = requests.post(WEB_API_URL, json=result_json)
-        print("Posted result to web API:", result.status_code)
-        # result_json = result.json()
-        # print("Background removal completed:", result_json)
-        # result = {"status": "background removed", "data": payload}
         print("Background removal result:", result_json)
+        print("Sending result to API:", WEB_API_URL)
+        send_result.delay(WEB_API_URL, result_json)
+        return
         # return result
     except Exception as exc:
         raise self.retry(exc=exc)
@@ -235,8 +233,9 @@ def resize_image(self, task_id, payload):
             },
             "error": None
         }
-        result = requests.post(WEB_API_URL, json=result_json)
-        print("Posted result to web API:", result.status_code)
+        send_result.delay(WEB_API_URL, result_json)
+        print("Resizing result:", result_json)
+        return
 
     except Exception as exc:
         raise self.retry(exc=exc)
@@ -372,11 +371,8 @@ def to_pdf(self, task_id, payload):
             "error": None
         }
 
-        # Send result to backend API
-        api_response = requests.post(WEB_API_URL, json=result_json, timeout=10)
-        api_response.raise_for_status()
-
-        return result_json
+        send_result.delay(WEB_API_URL, result_json)
+        return 
 
     except Exception as exc:
         print(f"Error in PDF task: {type(exc).__name__}: {exc}")
@@ -389,4 +385,20 @@ def to_pdf(self, task_id, payload):
             except Exception as cleanup_error:
                 print(f"Failed to clean up {temp_file}: {cleanup_error}")
         
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=3, name="task.send_result")
+def send_result(self, api_url, payload):
+    try:
+        print("Sending result to API:", api_url)
+        response = requests.post(api_url, json=payload)
+        logger.info(
+            f"POST {api_url} | IP=%s | Payload=%s",
+            response.remote_addr,
+            response
+        )
+        print("API response status:", response.status_code)
+        return response.json()
+    except Exception as exc:
         raise self.retry(exc=exc)
