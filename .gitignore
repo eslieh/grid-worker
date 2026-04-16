@@ -9,7 +9,7 @@ __pycache__/
 *.pyo
 
 # IDE settings
-.vscode/
+.vscode/ bus
 .idea/
 
 # OS-specific files
